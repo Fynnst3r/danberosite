@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Howl } from "howler";
 import WaveSurfer from "wavesurfer.js";
+import VolumeHigh from "@/public/icons/speaker-loud.svg";
+import VolumeLow from "@/public/icons/speaker-quiet.svg";
+import VolumeMuted from "@/public/icons/speaker-mute.svg";
+import PlayButton from "@/public/icons/play-button.svg";
+import PauseButton from "@/public/icons/pause-button.svg";
+import Image from "next/image";
 
 export default function DualCrossfadePlayer({
   trackTitle,
@@ -11,6 +17,8 @@ export default function DualCrossfadePlayer({
   bTitle,
   trackA,
   trackB,
+  colorA,
+  colorB,
 }: {
   trackTitle: string;
   crossTitle: string;
@@ -18,10 +26,14 @@ export default function DualCrossfadePlayer({
   bTitle: string;
   trackA: string;
   trackB: string;
+  colorA: string;
+  colorB: string;
 }) {
   const uid = useRef(Math.random().toString(36).slice(2));
   const waveA = useRef<WaveSurfer | null>(null);
   const waveB = useRef<WaveSurfer | null>(null);
+  const lighterWaveA = lighten(colorA, 42);
+  const lighterWaveB = lighten(colorB, 42);
 
   const playerA = useRef<Howl | null>(null);
   const playerB = useRef<Howl | null>(null);
@@ -31,9 +43,11 @@ export default function DualCrossfadePlayer({
   const [crossfade, setCrossfade] = useState(0);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [masterVolume, setMasterVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
   const [duration, setDuration] = useState(0);
   const [loop, setLoop] = useState(false);
-  const [showWaves, setShowWaves] = useState(true);
+  const [showWaves, setShowWaves] = useState(false);
 
   const formatTime = (seconds: number) => {
     if (!seconds || isNaN(seconds)) return "0:00";
@@ -43,6 +57,10 @@ export default function DualCrossfadePlayer({
       .padStart(2, "0");
     return `${m}:${s}`;
   };
+
+  function lighten(color: string, amount: number) {
+    return `color-mix(in srgb, ${color} ${100 - amount}%, white ${amount}%)`;
+  }
 
   const startPlayback = () => {
     if (isPlaying) return;
@@ -63,6 +81,13 @@ export default function DualCrossfadePlayer({
       html5: false,
       loop,
     });
+    applyMasterVolume(masterVolume);
+    updateCrossfade(crossfade);
+
+    if (isMuted) {
+      playerA.current.volume(0);
+      playerB.current.volume(0);
+    }
 
     playerA.current.play();
     playerB.current.play();
@@ -85,38 +110,54 @@ export default function DualCrossfadePlayer({
     }
   };
 
-  const restartPlayback = () => {
-    if (!playerA.current || !playerB.current) return;
-
-    playerA.current.seek(0);
-    playerB.current.seek(0);
-
-    if (!isPaused) {
-      playerA.current.play();
-      playerB.current.play();
-    }
-
-    setCurrentTime(0);
-    setProgress(0);
-  };
-
   const updateCrossfade = (value: number) => {
     setCrossfade(value);
 
     if (playerA.current && playerB.current) {
-      // DJ-style logarithmic fade curve
-      const volA = Math.pow(1 - value, 1.5);
-      const volB = Math.pow(value, 1.5);
+      const volA = Math.pow(1 - value, 1.5) * (isMuted ? 0 : masterVolume);
+      const volB = Math.pow(value, 1.5) * (isMuted ? 0 : masterVolume);
 
       playerA.current.volume(volA);
       playerB.current.volume(volB);
     }
     if (waveA.current && waveB.current) {
       waveA.current.getWrapper().style.opacity = String(1 - value);
-      waveA.current.getWrapper().style.filter = `drop-shadow(0 0 ${10 * (1 - value)}px #4caf50)`;
       waveB.current.getWrapper().style.opacity = String(value);
-      waveB.current.getWrapper().style.filter = `drop-shadow(0 0 ${10 * value}px #9c27b0)`;
     }
+  };
+
+  const applyMasterVolume = (vol: number) => {
+    if (!playerA.current || !playerB.current) return;
+
+    const volA = Math.pow(1 - crossfade, 1.5) * vol;
+    const volB = Math.pow(crossfade, 1.5) * vol;
+
+    playerA.current.volume(volA);
+    playerB.current.volume(volB);
+  };
+
+  const toggleMute = () => {
+    if (!playerA.current || !playerB.current) return;
+
+    if (isMuted) {
+      applyMasterVolume(masterVolume);
+      setIsMuted(false);
+    } else {
+      playerA.current.volume(0);
+      playerB.current.volume(0);
+      setIsMuted(true);
+    }
+  };
+
+  const getVolumeIcon = () => {
+    if (isMuted || masterVolume === 0) return VolumeMuted;
+    if (masterVolume < 0.5) return VolumeLow;
+    return VolumeHigh;
+  };
+
+  const updateMasterVolume = (value: number) => {
+    setMasterVolume(value);
+    if (!isMuted) applyMasterVolume(value);
   };
 
   const seekTo = (value: number) => {
@@ -201,16 +242,16 @@ export default function DualCrossfadePlayer({
 
     waveA.current = WaveSurfer.create({
       container: `#waveA-${uid.current}`,
-      waveColor: "#4caf50",
-      progressColor: "#81c784",
+      waveColor: colorA,
+      progressColor: lighterWaveA,
       height: 80,
       normalize: true,
     });
 
     waveB.current = WaveSurfer.create({
       container: `#waveB-${uid.current}`,
-      waveColor: "#9c27b0",
-      progressColor: "#ce93d8",
+      waveColor: colorB,
+      progressColor: lighterWaveB,
       height: 80,
       normalize: true,
     });
@@ -228,11 +269,16 @@ export default function DualCrossfadePlayer({
 
   return (
     <div
-      style={{ width: "400px", margin: "20px auto", fontFamily: "sans-serif" }}
+      style={{
+        display: "block",
+        margin: "0 auto",
+        width: "400px",
+        fontFamily: "sans-serif",
+      }}
     >
       <h2>{trackTitle}</h2>
 
-      {!isPlaying && <button onClick={startPlayback}>Play Tracks</button>}
+      {!isPlaying && <button onClick={startPlayback}>Play Track</button>}
       {isPlaying && (
         <>
           <button onClick={closePlayer}>Close Player</button>
@@ -258,29 +304,17 @@ export default function DualCrossfadePlayer({
             <div style={{ marginTop: "20px" }}>
               <div
                 id={`waveA-${uid.current}`}
-                style={{ width: "100%", height: "80px" }}
+                style={{ width: "75%", height: "80px" }}
               />
               <div
                 id={`waveB-${uid.current}`}
-                style={{ width: "100%", height: "80px", marginTop: "10px" }}
+                style={{ width: "75%", height: "80px", marginTop: "10px" }}
               />
             </div>
           )}
 
-          {/* Loop Toggle */}
-          <div style={{ marginTop: "10px" }}>
-            <label>
-              <input
-                type="checkbox"
-                checked={loop}
-                onChange={(e) => setLoop(e.target.checked)}
-              />
-              Loop
-            </label>
-          </div>
-
           {/* Crossfade */}
-          <div style={{ marginTop: "20px" }}>
+          <div style={{ marginTop: "20px", marginLeft: "0px", width: "75%" }}>
             <label>{crossTitle}</label>
             <input
               type="range"
@@ -294,12 +328,25 @@ export default function DualCrossfadePlayer({
             />
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span>{aTitle}</span>
+              <span>|</span>
               <span>{bTitle}</span>
             </div>
           </div>
 
+          {/* Loop Toggle */}
+          <div style={{ marginTop: "15px" }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={loop}
+                onChange={(e) => setLoop(e.target.checked)}
+              />
+              Loop
+            </label>
+          </div>
+
           {/* Seek Bar */}
-          <div style={{ marginTop: "20px" }}>
+          <div style={{ marginTop: "5px", marginLeft: "0px", width: "75%" }}>
             <label>Seek</label>
             <input
               type="range"
@@ -314,7 +361,7 @@ export default function DualCrossfadePlayer({
           </div>
 
           {/* Progress */}
-          <div style={{ marginTop: "10px", textAlign: "center" }}>
+          <div style={{ marginTop: "10px", textAlign: "center", width: "75%" }}>
             {formatTime(currentTime)} / {formatTime(duration)}
           </div>
 
@@ -324,34 +371,85 @@ export default function DualCrossfadePlayer({
             style={{
               marginTop: "10px",
               padding: "8px 16px",
-              background: "#444",
+              background: "#bebebe",
               color: "white",
               borderRadius: "6px",
               border: "none",
               cursor: "pointer",
             }}
           >
-            {isPaused ? "Resume" : "Pause"}
+            {isPaused ? (
+              <Image src={PlayButton} alt="stop icon" width={25} height={28} />
+            ) : (
+              <Image src={PauseButton} alt="stop icon" width={25} height={28} />
+            )}
           </button>
 
-          {/* Restart */}
-          <button
-            onClick={restartPlayback}
+          {/* Volume Controll */}
+          <div
+            className="volume-wrapper"
             style={{
-              marginLeft: "10px",
-              padding: "8px 16px",
-              background: "#666",
-              color: "white",
-              borderRadius: "6px",
-              border: "none",
-              cursor: "pointer",
+              marginTop: "10px",
+              paddingRight: "42px",
+              position: "relative",
+              display: "inline-block",
             }}
           >
-            Restart
-          </button>
+            <button
+              onClick={toggleMute}
+              style={{
+                marginTop: "10px",
+                marginLeft: "10px",
+                padding: "8px 16px",
+                background: isMuted ? "#b71c1c" : "#bebebe",
+                color: "white",
+                borderRadius: "6px",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <Image
+                src={getVolumeIcon()}
+                alt="volume icon"
+                width={22}
+                height={25}
+              />
+            </button>
+
+            <div
+              className="volume-slider-container"
+              style={{
+                position: "absolute",
+                top: "15px",
+                right: "-100px",
+                width: "120px",
+                padding: "3px",
+                background: "#222",
+                borderRadius: "6px",
+                display: "none",
+              }}
+            >
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={masterVolume}
+                onChange={(e) => updateMasterVolume(parseFloat(e.target.value))}
+                style={{ width: "100%" }}
+              />
+            </div>
+          </div>
         </>
       )}
       <style jsx>{`
+        :global(.volume-wrapper:hover .volume-slider-container) {
+          display: block !important;
+        }
+
         /* CROSSFADE SLIDER */
         .crossfade-slider::-webkit-slider-runnable-track {
           background: #4caf50;
